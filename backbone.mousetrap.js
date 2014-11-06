@@ -14,9 +14,19 @@
         var infos = callbacks[key];
         var event = args[0];
 
+        var returnCode = null;
         _.each(infos, function (info) {
-            info.method.apply(info.view, args);
+             // Do not continue propagating once something says to stop
+            if (returnCode === false) return;
+            var innerReturnCode = info.method.apply(info.view, args);
+
+            // If any of our handlers return false, pass that along
+            if (innerReturnCode === false) {
+              returnCode = false;
+            }
         });
+
+        return returnCode;
     };
 
     var addCallback = function (key, view, method) {
@@ -32,7 +42,7 @@
         }
 
         return function () {
-            processEvent(arguments, key);
+            return processEvent(arguments, key);
         };
     };
 
