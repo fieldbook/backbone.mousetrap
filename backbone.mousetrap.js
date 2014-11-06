@@ -5,9 +5,50 @@
     var oldUndelegateEvents = Backbone.View.prototype.undelegateEvents;
     var oldRemove = Backbone.View.prototype.remove;
 
-    // Map from keyboard commands to the View instance that most recently bound each one.
-    // so we can avoid accidentally unbinding keys when a view replaced a previous view's keybinding.
-    var lastBound = {};
+    // We've added these methods to allow multiple views to have keyboard
+    // focus.  We'll record the view they came from and just trigger all the
+    // callbacks registered for a particular keypress.
+    var callbacks = {};
+    var processEvent = function (args, key) {
+        var self = this;
+        var infos = callbacks[key];
+        var event = args[0];
+
+        _.each(infos, function (info) {
+            info.method.apply(info.view, args);
+        });
+    };
+
+    var addCallback = function (key, view, method) {
+        var info = {
+            view: view,
+            method: method,
+        };
+
+        if (key in callbacks) {
+            callbacks[key].unshift(info);
+        } else {
+            callbacks[key] = [info];
+        }
+
+        return function () {
+            processEvent(arguments, key);
+        };
+    };
+
+    var removeCallbacksForView = function (view) {
+        _.each(callbacks, function (infos, key) {
+            var newInfos =  _.filter(infos, function (info) {
+                return info.view !== view
+            });
+
+            callbacks[key] = newInfos;
+            if (newInfos.length === 0) {
+                Mousetrap.unbind(key);
+                delete callbacks[key];
+            }
+        });
+    };
 
     _.extend(Backbone.View.prototype, {
 
@@ -19,7 +60,8 @@
                 var method = events[key];
                 if (!_.isFunction(method)) method = this[events[key]];
                 if (!method) throw new Error('Method "' + events[key] + '" does not exist');
-                method = _.bind(method, this);
+                method = addCallback(key, this, method);
+
 
                 // Use global-bind plugin when appropriate
                 // https://github.com/ccampbell/mousetrap/tree/master/plugins/global-bind
@@ -28,18 +70,12 @@
                 } else {
                     Mousetrap.bind(key, method);
                 }
-                lastBound[key] = this;
             }
             return this;
         },
 
         unbindKeyboardEvents: function() {
-            for (var keys in this.keyboardEvents) {
-                if (lastBound[keys] === this) {
-                    Mousetrap.unbind(keys);
-                    delete lastBound[keys];
-                }
-            }
+            removeCallbacksForView(this);
             return this;
         },
 
